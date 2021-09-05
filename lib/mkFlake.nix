@@ -81,6 +81,18 @@ let
   ];
 
   getChannels = system: self.pkgs.${system};
+  ensureChannelsWitsInputs = mapAttrs
+    (n: v:
+      if (!v ? input) then
+        v // {
+          input = inputs.${n} or (
+            throw ''
+              No input is inferable by name from flake inputs for channel "${n}"
+            '');
+        }
+      else v
+    )
+    channels;
   getNixpkgs = host: (getChannels host.system).${host.channelName};
 
   configurationBuilder = reverseDomainName: host': (
@@ -97,7 +109,7 @@ let
       selectedNixpkgs = getNixpkgs host;
       host = evalHostArgs (mergeAny hostDefaults host');
       patchedChannel = selectedNixpkgs.path;
-      channels = getChannels host.system;
+      channels' = getChannels host.system;
 
       specialArgs = host.specialArgs // { channel = selectedNixpkgs; };
 
@@ -109,10 +121,10 @@ let
       nixosSpecialArgs =
         let
           f = channelName:
-            { "${channelName}ModulesPath" = toString (channels.${channelName}.input + "/nixos/modules"); };
+            { "${channelName}ModulesPath" = toString (channels'.${channelName}.input + "/nixos/modules"); };
         in
         # Add `<channelName>ModulesPath`s
-        (foldl' (lhs: rhs: lhs // rhs) { } (map f (attrNames channels)))
+        (foldl' (lhs: rhs: lhs // rhs) { } (map f (attrNames channels')))
         # Override `modulesPath` because otherwise imports from there will not use patched nixpkgs
         // { modulesPath = toString (patchedChannel + "/nixos/modules"); };
 
@@ -196,14 +208,6 @@ mergeAny otherArguments (
   eachSystem supportedSystems
     (system:
       let
-        filterAttrs = pred: set:
-          listToAttrs (concatMap (name: let value = set.${name}; in if pred name value then [ ({ inherit name value; }) ] else [ ]) (attrNames set));
-
-        # Little hack, we make sure that `legacyPackages` contains `nix` to make sure that we are dealing with nixpkgs.
-        # For some odd reason `devshell` contains `legacyPackages` out put as well
-        channelFlakes = filterAttrs (_: value: value ? legacyPackages && value.legacyPackages.x86_64-linux ? nix) inputs;
-        channelsFromFlakes = mapAttrs (name: input: { inherit input; }) channelFlakes;
-
         importChannel = name: value: (import (patchChannel system value.input (value.patches or [ ])) {
           inherit system;
           overlays = [
@@ -215,7 +219,7 @@ mergeAny otherArguments (
           config = channelsConfig // (value.config or { });
         }) // { inherit name; inherit (value) input; };
 
-        pkgs = mapAttrs importChannel (mergeAny channelsFromFlakes channels);
+        pkgs = mapAttrs importChannel ensureChannelsWitsInputs;
 
         systemOutputs = outputsBuilder pkgs;
 
