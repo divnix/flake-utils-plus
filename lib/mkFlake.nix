@@ -94,20 +94,6 @@ let
     )
     channels;
   getNixpkgs = host: (getChannels host.system).${host.channelName};
-  mergeNixpkgsConfigs = input: lconf: rconf: (
-    input.lib.evalModules {
-      modules = [
-        "${input}/nixos/modules/misc/assertions.nix"
-        "${input}/nixos/modules/misc/nixpkgs.nix"
-        {
-          nixpkgs.config = lconf;
-        }
-        {
-          nixpkgs.config = rconf;
-        }
-      ];
-    }
-  ).config.nixpkgs.config;
 
   configurationBuilder = reverseDomainName: host': (
     let
@@ -247,7 +233,7 @@ mergeAny otherArguments (
           sharedOverlays ++ (if (value ? overlaysBuilder) then (value.overlaysBuilder pkgs) else [ ])
           ++
           [ flake-utils-plus.overlay ];
-          config = mergeNixpkgsConfigs value.input channelsConfig (value.config or { });
+          config = channelsConfig // (value.config or { });
         });
 
         pkgs = mapAttrs importChannel ensureChannelsWitsInputs;
